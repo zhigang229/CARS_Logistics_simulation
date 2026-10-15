@@ -1,6 +1,6 @@
 # 部署说明 · 场内物流 3D 仿真台（IIS 内网版）
 
-本说明适用于发布包 `LogiSim-IIS-v1.0.0.zip`。站点所有脚本、样式、字体都随包发布，**服务器和客户端都不需要访问外网**。
+本说明适用于发布包 `LogiSim-IIS-v1.1.0.zip`。站点所有脚本、样式、字体都随包发布，**服务器和客户端都不需要访问外网**。
 
 ## 1. 环境要求
 
@@ -16,11 +16,11 @@
 
 ## 2. 一键部署（推荐）
 
-1. 把 `LogiSim-IIS-v1.0.0.zip` 复制到服务器并解压，例如解压到 `D:\Install\LogiSim-IIS-v1.0.0`。
+1. 把 `LogiSim-IIS-v1.1.0.zip` 复制到服务器并解压，例如解压到 `D:\Install\LogiSim-IIS-v1.1.0`。
 2. 以**管理员身份**打开 PowerShell，进入 `deploy` 目录：
 
    ```powershell
-   cd D:\Install\LogiSim-IIS-v1.0.0\deploy
+   cd D:\Install\LogiSim-IIS-v1.1.0\deploy
    Set-ExecutionPolicy -Scope Process Bypass
    .\install-iis.ps1
    ```
@@ -110,7 +110,7 @@ IIS 默认的应用程序池虚拟账号访问网络共享时，使用 IIS 服�
 1. **服务器**：以管理员身份运行，把站点目录共享给开发人员的域账号：
 
    ```powershell
-   cd D:\Install\LogiSim-IIS-v1.0.0\deploy
+   cd D:\Install\LogiSim-IIS-v1.1.0\deploy
    .\enable-remote-publish.ps1 -Publisher "域名\你的账号"
    ```
 
