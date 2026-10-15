@@ -1,0 +1,512 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>场内物流 3D 仿真台</title>
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="assets/css/app.css?v=1.1.0">
+</head>
+<body>
+<div id="boot" class="boot">
+  <div class="boot-card">
+    <b>场内物流 3D 仿真台</b>
+    <span>正在加载…</span>
+    <span class="note">如果长时间停留在此页面，请使用新版 Chrome 或 Edge 浏览器打开（不支持 IE）。</span>
+  </div>
+</div>
+<noscript><div class="boot"><div class="boot-card"><b>需要启用 JavaScript</b><span>请在浏览器设置中允许本站运行脚本。</span></div></div></noscript>
+
+<div id="app" class="app mode-layout" v-cloak>
+  <header class="top">
+    <div class="brand"><span class="mark" aria-hidden="true"></span>
+      <div><div class="brand-name">场内物流 3D 仿真台</div><div class="brand-sub">AGV · 小料车 · MILK RUN · v{{APP_VERSION}}</div></div>
+      <span :class="['store-badge',s.store.mode,{err:s.store.status==='error'}]" :title="storeTitle">{{storeLabel}}<em v-if="saveLabel"> · {{saveLabel}}</em></span>
+    </div>
+    <div class="row scn">
+      <label class="sr" for="scnSel">当前方案</label>
+      <select id="scnSel" :value="s.currentId" @change="switchScenario($event.target.value)" :disabled="locked">
+        <option v-for="x in s.scenarios" :key="x.id" :value="x.id">{{x.name}}</option>
+      </select>
+      <button class="btn" @click="newScenario" :disabled="locked">新建</button>
+      <button class="btn" @click="dupScenario" :disabled="locked">复制方案</button>
+      <button class="btn" @click="openDialog('rename')" :disabled="locked">重命名</button>
+      <button class="btn" @click="openDialog('delete')" :disabled="locked || s.scenarios.length<2">删除</button>
+      <button class="btn" @click="openDialog('io')">导入 / 导出</button>
+    </div>
+    <div class="row">
+      <button class="btn icon" @click="undo" :disabled="locked || !s.undoN" title="撤销 Ctrl+Z" aria-label="撤销">↶</button>
+      <button class="btn icon" @click="redo" :disabled="locked || !s.redoN" title="重做 Ctrl+Y" aria-label="重做">↷</button>
+      <div class="seg"><button :class="['btn',{on:s.view==='3d'}]" @click="setView('3d')">3D</button><button :class="['btn',{on:s.view==='top'}]" @click="setView('top')">俯视 2D</button></div>
+      <button class="btn" @click="fitView">全景</button>
+    </div>
+  </header>
+
+  <nav class="modes" role="tablist" aria-label="工作流程">
+    <button v-for="m in MODES" :key="m.id" role="tab" :aria-selected="s.mode===m.id" :class="['mode',{on:s.mode===m.id}]" @click="setMode(m.id)"><span class="mode-no">{{m.no}}</span>{{m.label}}</button>
+  </nav>
+
+  <main class="work">
+    <!-- ============ LEFT: tools ============ -->
+    <aside class="panel">
+      <template v-if="s.mode==='layout'">
+        <div class="grp"><div class="lab">操作</div>
+          <div class="tools">
+            <button :class="['btn tool',{on:s.tool==='select'}]" @click="setTool('select')">选择 / 移动</button>
+            <button :class="['btn tool',{on:s.tool==='orbit'}]" @click="setTool('orbit')">漫游视角</button>
+          </div>
+        </div>
+        <div class="grp"><div class="lab">放置设施</div>
+          <div class="tools">
+            <button v-for="(t,k) in OBJ_TYPES" :key="k" :class="['btn tool',{on:s.tool==='place:'+k}]" @click="setTool('place:'+k)" :disabled="locked"><i class="sw" :style="{background:t.color}"></i>{{t.label}}</button>
+          </div>
+        </div>
+        <fieldset :disabled="locked" class="grp"><div class="lab">车间尺寸</div>
+          <div class="pair">
+            <div class="field" style="grid-template-columns:22px 1fr"><label for="lw">长</label><input id="lw" type="number" min="10" max="400" step="1" v-model.number="s.sc.layout.w" @focus="pushHistory"></div>
+            <div class="field" style="grid-template-columns:22px 1fr"><label for="ld">宽</label><input id="ld" type="number" min="10" max="400" step="1" v-model.number="s.sc.layout.d" @focus="pushHistory"></div>
+          </div>
+          <div class="note">单位 m，原点在左上角，X 向右、Z 向下。</div>
+        </fieldset>
+        <fieldset :disabled="locked" class="grp"><div class="lab">CAD 底图</div>
+          <label class="btn" for="bgFile" style="text-align:center">导入图片底图…</label>
+          <input id="bgFile" class="sr" type="file" accept="image/png,image/jpeg,image/webp" @change="loadBg">
+          <template v-if="s.sc.bg">
+            <div class="field"><label for="bgw">图宽 (m)</label><input id="bgw" type="number" step="0.5" v-model.number="s.sc.bg.width" @focus="pushHistory"></div>
+            <div class="pair">
+              <div class="field" style="grid-template-columns:22px 1fr"><label for="bgx">X</label><input id="bgx" type="number" step="0.5" v-model.number="s.sc.bg.x" @focus="pushHistory"></div>
+              <div class="field" style="grid-template-columns:22px 1fr"><label for="bgz">Z</label><input id="bgz" type="number" step="0.5" v-model.number="s.sc.bg.z" @focus="pushHistory"></div>
+            </div>
+            <div class="field"><label for="bgo">透明度</label><input id="bgo" type="range" min="0.1" max="1" step="0.05" v-model.number="s.sc.bg.opacity"></div>
+            <button class="btn danger" @click="clearBg">移除底图</button>
+          </template>
+          <div class="note">DXF/DWG 请先在 CAD 中按 1:1 导出为 PNG，再输入图片对应的实际宽度描图。</div>
+        </fieldset>
+      </template>
+
+      <template v-else-if="s.mode==='network'">
+        <div class="grp"><div class="lab">操作</div>
+          <div class="tools">
+            <button :class="['btn tool',{on:s.tool==='select'}]" @click="setTool('select')">选择 / 拖节点</button>
+            <button :class="['btn tool',{on:s.tool==='draw'}]" @click="setTool('draw')" :disabled="locked">绘制路径</button>
+            <button :class="['btn tool',{on:s.tool==='orbit'}]" @click="setTool('orbit')">漫游视角</button>
+          </div>
+        </div>
+        <fieldset :disabled="locked" class="grp"><div class="lab">新路段默认</div>
+          <div class="seg"><button :class="['btn',{on:s.newDir==='fwd'}]" @click="s.newDir='fwd'">单向</button><button :class="['btn',{on:s.newDir==='both'}]" @click="s.newDir='both'">双向</button></div>
+          <div class="field"><label for="nlim">限速 m/s</label><input id="nlim" type="number" min="0" step="0.1" v-model.number="s.newLimit" placeholder="不限"></div>
+          <label class="check"><input type="checkbox" v-model="s.angleSnap"> 角度吸附 45°</label>
+        </fieldset>
+        <div class="grp"><div class="lab">路网</div>
+          <dl class="kv"><dt>节点</dt><dd>{{s.sc.nodes.length}}</dd><dt>路段</dt><dd>{{s.sc.edges.length}}</dd><dt>总长</dt><dd>{{netLength.toFixed(1)}} m</dd></dl>
+          <button class="btn" @click="tidyNetwork(true)" :disabled="locked">整理路网（合并重叠与交叉）</button>
+          <button class="btn" @click="runValidate">校验路网与路线</button>
+          <div class="note">绘制路段、拖动节点后会自动整理：交叉处生成路口，重叠路段合并（方向相反的单向合并为双向），相近节点合并。</div>
+          <button class="btn danger" @click="openDialog('clearNet')" :disabled="locked || !s.sc.nodes.length">清空路网</button>
+        </div>
+      </template>
+
+      <template v-else-if="s.mode==='stations'">
+        <div class="grp"><div class="lab">操作</div>
+          <div class="tools">
+            <button :class="['btn tool',{on:s.tool==='select'}]" @click="setTool('select')">选择</button>
+            <button :class="['btn tool',{on:s.tool==='station'}]" @click="setTool('station')" :disabled="locked">添加站点</button>
+            <button :class="['btn tool',{on:s.tool==='orbit'}]" @click="setTool('orbit')">漫游视角</button>
+          </div>
+        </div>
+        <div class="grp"><div class="lab">站点 {{s.sc.stations.length}}</div>
+          <div class="list">
+            <button v-for="st in s.sc.stations" :key="st.id" :class="['li',{on:isSel('station',st.id)}]" @click="select('station',st.id)">
+              <i class="sw" :style="{background:STATION_TYPES[st.type].color}"></i><span class="grow">{{st.name}}</span><span class="tag mono">{{dwellText(st)}}</span>
+            </button>
+          </div>
+          <div class="note" v-if="!s.sc.stations.length">还没有站点。选「添加站点」后点击路网节点或路段。</div>
+        </div>
+      </template>
+
+      <template v-else-if="s.mode==='routes'">
+        <div class="grp"><div class="lab">路线 {{s.sc.routes.length}}</div>
+          <div class="list">
+            <button v-for="r in s.sc.routes" :key="r.id" :class="['li',{on:isSel('route',r.id)}]" @click="select('route',r.id)">
+              <i class="sw" :style="{background:r.color}"></i><span class="grow">{{r.name}}</span><span class="tag">{{r.count}} 台</span>
+            </button>
+          </div>
+          <button class="btn" @click="addRoute" :disabled="locked">＋ 新建路线</button>
+        </div>
+        <div class="grp"><div class="lab">车型 {{s.sc.vtypes.length}}</div>
+          <div class="list">
+            <button v-for="v in s.sc.vtypes" :key="v.id" :class="['li',{on:isSel('vtype',v.id)}]" @click="select('vtype',v.id)">
+              <i class="sw" :style="{background:v.color}"></i><span class="grow">{{v.name}}</span><span class="tag mono">{{v.vmax}} m/s</span>
+            </button>
+          </div>
+          <button class="btn" @click="addVtype" :disabled="locked">＋ 新建车型</button>
+        </div>
+        <div class="grp" v-if="s.tool==='pickVia'&&s.legEdit">
+          <div class="warnbox">正在指定「{{legEditName}}」的行驶路径：在场景中依次点击要经过的节点（圆点），相邻两点之间自动连通。</div>
+          <div class="row"><button class="btn" @click="undoVia">撤销上一点</button><button class="btn primary" @click="finishLeg">完成</button></div>
+        </div>
+        <div class="grp" v-if="s.tool==='pickStop'"><div class="warnbox">正在点选站点追加到路线，完成后按 Esc 或点下方按钮。</div><button class="btn primary" @click="setTool('select')">完成点选</button></div>
+      </template>
+
+      <template v-else>
+        <div class="grp"><div class="lab">显示</div>
+          <label class="check"><input type="checkbox" v-model="s.heat"> 路段拥堵热力</label>
+          <label class="check"><input type="checkbox" v-model="s.labels"> 标签与站牌</label>
+          <label class="check"><input type="checkbox" v-model="s.follow" :disabled="!s.selVeh"> 镜头跟随选中车辆</label>
+        </div>
+        <div class="grp"><div class="lab">车辆状态</div>
+          <div v-for="(v,k) in STATE" :key="k" style="font-size:12px"><span class="dot" :style="{background:stateColor(k)}"></span>{{v.l}} <span class="note">· {{v.d}}</span></div>
+        </div>
+        <div class="grp"><div class="lab">操作</div>
+          <div class="note">点击场景中的车辆查看实时状态；在右侧车辆行上点击也可选中。</div>
+          <button class="btn" @click="setTool(s.tool==='orbit'?'select':'orbit')" :class="{on:s.tool==='orbit'}">漫游视角（左键旋转）</button>
+        </div>
+      </template>
+    </aside>
+
+    <!-- ============ CENTER: stage ============ -->
+    <section class="stage" aria-label="三维车间场景">
+      <div id="viewport" ref="vp"></div>
+      <div class="lock" v-if="locked">仿真进行中，编辑已锁定 · 点「重置」后可修改</div>
+      <div class="legend" v-if="s.heat && s.mode==='analysis'">
+        <div><b>路段等待</b></div><div><i :style="{background:'var(--lane)'}"></i>无等待</div><div><i :style="{background:'var(--bad)'}"></i>等待最多</div>
+      </div>
+      <div class="hint">{{hint}}</div>
+      <div class="coord">{{s.cursor}}</div>
+      <div id="dimTip" class="dimtip" hidden></div>
+    </section>
+
+    <!-- ============ RIGHT: inspector / analysis ============ -->
+    <aside class="panel">
+      <!-- object -->
+      <fieldset v-if="selObj" :disabled="locked">
+        <div class="lab">{{OBJ_TYPES[selObj.type].label}}</div>
+        <div class="field"><label for="on">名称</label><input id="on" type="text" v-model="selObj.name" @focus="pushHistory"></div>
+        <div class="field" v-if="selObj.type==='zone'"><label for="ozk">区域类型</label><select id="ozk" v-model="selObj.zoneKind" @focus="pushHistory"><option v-for="z in ZONE_KINDS" :key="z">{{z}}</option></select></div>
+        <div class="pair">
+          <div class="field" style="grid-template-columns:30px 1fr"><label for="ox">X</label><input id="ox" type="number" step="0.5" v-model.number="selObj.x" @focus="pushHistory"></div>
+          <div class="field" style="grid-template-columns:30px 1fr"><label for="oz">Z</label><input id="oz" type="number" step="0.5" v-model.number="selObj.z" @focus="pushHistory"></div>
+          <div class="field" style="grid-template-columns:30px 1fr"><label for="ow">长</label><input id="ow" type="number" step="0.1" min="0.1" v-model.number="selObj.w" @focus="pushHistory"></div>
+          <div class="field" style="grid-template-columns:30px 1fr"><label for="odd">宽</label><input id="odd" type="number" step="0.1" min="0.1" v-model.number="selObj.d" @focus="pushHistory"></div>
+          <div class="field" style="grid-template-columns:30px 1fr" v-if="selObj.type!=='zone'"><label for="oh">高</label><input id="oh" type="number" step="0.1" min="0.05" v-model.number="selObj.h" @focus="pushHistory"></div>
+          <div class="field" style="grid-template-columns:30px 1fr"><label for="or">角度</label><input id="or" type="number" step="15" v-model.number="selObj.rot" @focus="pushHistory"></div>
+        </div>
+        <div class="field"><label for="oc">颜色</label><input id="oc" type="color" v-model="selObj.color" @focus="pushHistory"></div>
+        <div class="row"><button class="btn" @click="rotateSel">旋转 90°</button><button class="btn" @click="dupSel">复制</button><button class="btn danger" @click="deleteSel">删除</button></div>
+        <div class="note">尺寸单位 m。在场景中：拖动方块拉伸（对边固定，按住 Alt 以中心对称拉伸），拖动圆点旋转（15° 吸附，Shift 自由角度），拖动顶部箭头调高度；方向键微移 0.5 m，Shift+方向键 0.1 m。</div>
+      </fieldset>
+
+      <!-- node -->
+      <fieldset v-else-if="selNode" :disabled="locked">
+        <div class="lab">路网节点</div>
+        <div class="pair">
+          <div class="field" style="grid-template-columns:30px 1fr"><label for="nx">X</label><input id="nx" type="number" step="0.5" v-model.number="selNode.x" @focus="pushHistory"></div>
+          <div class="field" style="grid-template-columns:30px 1fr"><label for="nz">Z</label><input id="nz" type="number" step="0.5" v-model.number="selNode.z" @focus="pushHistory"></div>
+        </div>
+        <dl class="kv"><dt>连接路段</dt><dd>{{nodeDegree(selNode.id)}}</dd><dt>站点</dt><dd>{{stationAt(selNode.id)?.name || '—'}}</dd></dl>
+        <div class="row"><button class="btn" v-if="!stationAt(selNode.id)" @click="makeStation(selNode.id)">设为站点</button><button class="btn danger" @click="deleteSel">删除节点</button></div>
+      </fieldset>
+
+      <!-- edge -->
+      <fieldset v-else-if="selEdge" :disabled="locked">
+        <div class="lab">路段</div>
+        <dl class="kv"><dt>长度</dt><dd>{{edgeLen(selEdge).toFixed(2)}} m</dd></dl>
+        <div class="field"><label>方向</label><div class="seg"><button type="button" :class="['btn',{on:selEdge.dir==='fwd'}]" @click="pushHistory();selEdge.dir='fwd'">单向</button><button type="button" :class="['btn',{on:selEdge.dir==='both'}]" @click="pushHistory();selEdge.dir='both'">双向</button></div></div>
+        <div class="field"><label for="elim">限速 m/s</label><input id="elim" type="number" min="0" step="0.1" v-model.number="selEdge.limit" placeholder="不限" @focus="pushHistory"></div>
+        <div class="row"><button class="btn" @click="reverseEdge" :disabled="selEdge.dir==='both'">反转方向</button><button class="btn" @click="splitSelEdge">中点插入节点</button><button class="btn danger" @click="deleteSel">删除</button></div>
+        <div class="note">单向路段上的箭头表示通行方向。双向路段按右侧通行，对向车辆可会车。</div>
+      </fieldset>
+
+      <!-- station -->
+      <fieldset v-else-if="selStation" :disabled="locked">
+        <div class="lab">停靠站点</div>
+        <div class="field"><label for="sn">名称</label><input id="sn" type="text" v-model="selStation.name" @focus="pushHistory"></div>
+        <div class="field"><label for="stt">类型</label><select id="stt" v-model="selStation.type" @focus="pushHistory"><option v-for="(t,k) in STATION_TYPES" :key="k" :value="k">{{t.label}}</option></select></div>
+        <template v-if="selStation.type!=='charge'">
+          <div class="field"><label for="sdm">停留时间</label><select id="sdm" v-model="selStation.dwellMode" @focus="pushHistory"><option value="fixed">固定值</option><option value="uniform">均匀分布</option><option value="normal">正态分布</option></select></div>
+          <div class="pair">
+            <div class="field" style="grid-template-columns:44px 1fr"><label for="sd1">{{selStation.dwellMode==='fixed'?'秒':selStation.dwellMode==='uniform'?'最短 s':'均值 s'}}</label><input id="sd1" type="number" min="0" step="5" v-model.number="selStation.d1" @focus="pushHistory"></div>
+            <div class="field" style="grid-template-columns:44px 1fr" v-if="selStation.dwellMode!=='fixed'"><label for="sd2">{{selStation.dwellMode==='uniform'?'最长 s':'标准差'}}</label><input id="sd2" type="number" min="0" step="5" v-model.number="selStation.d2" @focus="pushHistory"></div>
+          </div>
+          <div class="field"><label for="snote">作业内容</label><input id="snote" type="text" v-model="selStation.note" placeholder="如：卸 4 箱 P-1001" @focus="pushHistory"></div>
+        </template>
+        <div class="note" v-else>充电点：低电量车辆在完成一圈后前往最近的充电点，充至 95% 返回首站。同一时刻只停 1 台，其余排队。</div>
+        <dl class="kv"><dt>所在节点</dt><dd>{{fmtXZ(nodeById(selStation.node))}}</dd><dt>被路线引用</dt><dd>{{routesUsing(selStation.id) || '—'}}</dd></dl>
+        <div class="row"><button class="btn danger" @click="deleteSel">删除站点</button></div>
+      </fieldset>
+
+      <!-- route -->
+      <fieldset v-else-if="selRoute" :disabled="locked">
+        <div class="lab">路线与车队</div>
+        <div class="field"><label for="rn">名称</label><input id="rn" type="text" v-model="selRoute.name" @focus="pushHistory"></div>
+        <div class="field"><label for="rc">颜色</label><input id="rc" type="color" v-model="selRoute.color" @focus="pushHistory"></div>
+        <div class="field"><label for="rv">车型</label><select id="rv" v-model="selRoute.vtype" @focus="pushHistory"><option v-for="v in s.sc.vtypes" :key="v.id" :value="v.id">{{v.name}}</option></select></div>
+        <div class="pair">
+          <div class="field" style="grid-template-columns:44px 1fr"><label for="rcnt">车辆数</label><input id="rcnt" type="number" min="0" max="40" step="1" v-model.number="selRoute.count" @focus="pushHistory"></div>
+          <div class="field" style="grid-template-columns:44px 1fr"><label for="rper">周期 s</label><input id="rper" type="number" min="0" step="30" v-model.number="selRoute.period" @focus="pushHistory"></div>
+        </div>
+        <div class="field" v-if="!(selRoute.period>0)"><label for="rgap">发车间隔 s</label><input id="rgap" type="number" min="0" step="10" v-model.number="selRoute.gap" @focus="pushHistory"></div>
+        <div class="note">周期 = 每台车的计划循环节拍（Milk Run）；填 0 为连续循环，车辆按发车间隔依次出发。</div>
+        <div class="lab" style="margin-top:6px">停靠顺序</div>
+        <div class="stops">
+          <template v-for="(sid,i) in selRoute.stops" :key="i+sid">
+          <div class="stop">
+            <span class="no">{{i+1}}</span><span class="grow" style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{stationById(sid)?.name || '（已删除）'}} <span class="note">{{stationById(sid)?dwellText(stationById(sid)):''}}</span></span>
+            <span class="row" style="gap:2px;flex-wrap:nowrap"><button type="button" class="btn sm" @click="moveStop(i,-1)" :disabled="i===0" aria-label="上移">↑</button><button type="button" class="btn sm" @click="moveStop(i,1)" :disabled="i===selRoute.stops.length-1" aria-label="下移">↓</button><button type="button" class="btn sm danger" @click="removeStop(i)" aria-label="移除">✕</button></span>
+          </div>
+          <div v-if="legInfos[i]" :class="['leg',{on:s.legEdit&&s.legEdit.key===legInfos[i].key,err:legInfos[i].err,via:legInfos[i].via}]">
+            <span class="leg-ico" aria-hidden="true">{{legInfos[i].ret?'↩':'↓'}}</span>
+            <span class="leg-txt">{{legInfos[i].ret?'返回第 1 站 · ':''}}{{legInfos[i].label}}</span>
+            <span class="row" style="gap:2px;flex-wrap:nowrap">
+              <button type="button" :class="['btn sm',{on:s.legEdit&&s.legEdit.key===legInfos[i].key}]" @click="editLeg(i)">{{s.legEdit&&s.legEdit.key===legInfos[i].key?'完成':'指定路径'}}</button>
+              <button type="button" class="btn sm" v-if="legInfos[i].via" @click="clearLeg(i)" title="清除途经点，改为自动最短路径">自动</button>
+            </span>
+          </div>
+          </template>
+        </div>
+        <div class="row">
+          <label class="sr" for="addst">追加站点</label>
+          <select id="addst" style="flex:1;width:auto" @change="addStop($event.target.value);$event.target.value=''"><option value="">＋ 追加站点…</option><option v-for="st in s.sc.stations.filter(x=>x.type!=='charge')" :key="st.id" :value="st.id">{{st.name}}</option></select>
+          <button type="button" :class="['btn',{on:s.tool==='pickStop'}]" @click="setTool(s.tool==='pickStop'?'select':'pickStop')">在场景点选</button>
+        </div>
+        <div class="note">最后一站之后自动返回第 1 站，构成闭环。第 1 站为装货 / 发车点。每两站之间默认走最短路径；点「指定路径」可在场景中依次点选要经过的节点，去程与回程可分别指定。</div>
+        <template v-if="routeEst">
+          <div class="lab" style="margin-top:6px">理论估算</div>
+          <div v-if="routeEst.err" class="warnbox">{{routeEst.err}}</div>
+          <dl class="kv" v-else>
+            <dt>一圈路程</dt><dd>{{routeEst.len.toFixed(0)}} m</dd>
+            <dt>行驶时间</dt><dd>{{fmtMS(routeEst.drive)}}</dd>
+            <dt>作业时间（均值）</dt><dd>{{fmtMS(routeEst.dwell)}}</dd>
+            <dt>理论循环时间</dt><dd>{{fmtMS(routeEst.cycle)}}</dd>
+            <template v-if="selRoute.period>0"><dt>节拍余量</dt><dd :style="{color: routeEst.cycle>selRoute.period?'var(--bad)':'var(--good)'}">{{fmtMS(selRoute.period-routeEst.cycle)}}</dd></template>
+          </dl>
+          <div class="note" v-if="!routeEst.err">估算不含排队、转弯减速与交通管制，实际以仿真结果为准。</div>
+        </template>
+        <div class="row"><button class="btn danger" @click="deleteSel">删除路线</button></div>
+      </fieldset>
+
+      <!-- vehicle type -->
+      <fieldset v-else-if="selVtype" :disabled="locked">
+        <div class="lab">车型参数</div>
+        <div class="field"><label for="vn">名称</label><input id="vn" type="text" v-model="selVtype.name" @focus="pushHistory"></div>
+        <div class="field"><label for="vk">形态</label><select id="vk" v-model="selVtype.kind" @focus="pushHistory"><option v-for="(l,k) in VKINDS" :key="k" :value="k">{{l}}</option></select></div>
+        <div class="field"><label for="vc">颜色</label><input id="vc" type="color" v-model="selVtype.color" @focus="pushHistory"></div>
+        <div class="lab">几何 (m)</div>
+        <div class="pair">
+          <div class="field" style="grid-template-columns:30px 1fr"><label for="vl">车长</label><input id="vl" type="number" min="0.3" step="0.1" v-model.number="selVtype.length" @focus="pushHistory"></div>
+          <div class="field" style="grid-template-columns:30px 1fr"><label for="vw">车宽</label><input id="vw" type="number" min="0.3" step="0.1" v-model.number="selVtype.width" @focus="pushHistory"></div>
+          <div class="field" style="grid-template-columns:30px 1fr"><label for="vh">车高</label><input id="vh" type="number" min="0.1" step="0.05" v-model.number="selVtype.height" @focus="pushHistory"></div>
+        </div>
+        <template v-if="selVtype.kind==='tug'">
+          <div class="pair">
+            <div class="field" style="grid-template-columns:44px 1fr"><label for="vcn">拖挂节</label><input id="vcn" type="number" min="0" max="8" step="1" v-model.number="selVtype.carts" @focus="pushHistory"></div>
+            <div class="field" style="grid-template-columns:44px 1fr"><label for="vcl">料车长</label><input id="vcl" type="number" min="0.5" step="0.1" v-model.number="selVtype.cartLen" @focus="pushHistory"></div>
+          </div>
+        </template>
+        <div class="lab">运动</div>
+        <div class="pair">
+          <div class="field" style="grid-template-columns:44px 1fr"><label for="vv">速度</label><input id="vv" type="number" min="0.1" step="0.1" v-model.number="selVtype.vmax" @focus="pushHistory"></div>
+          <div class="field" style="grid-template-columns:44px 1fr"><label for="va">加速度</label><input id="va" type="number" min="0.05" step="0.05" v-model.number="selVtype.acc" @focus="pushHistory"></div>
+        </div>
+        <div class="note">速度 m/s，加速度 m/s²。转弯处自动降速至 0.45 m/s。</div>
+        <div class="lab">电池</div>
+        <div class="pair">
+          <div class="field" style="grid-template-columns:44px 1fr"><label for="vrt">续航 h</label><input id="vrt" type="number" min="0" step="0.5" v-model.number="selVtype.runtimeH" @focus="pushHistory"></div>
+          <div class="field" style="grid-template-columns:44px 1fr"><label for="vch">充满 h</label><input id="vch" type="number" min="0.1" step="0.1" v-model.number="selVtype.chargeH" @focus="pushHistory"></div>
+          <div class="field" style="grid-template-columns:44px 1fr"><label for="vlow">回充 %</label><input id="vlow" type="number" min="5" max="90" step="5" v-model.number="selVtype.lowPct" @focus="pushHistory"></div>
+        </div>
+        <div class="note">续航填 0 表示不计电量（如人工小料车）。多台车初始电量自动错开，避免同时回充。</div>
+        <div class="row"><button class="btn danger" @click="deleteSel">删除车型</button></div>
+      </fieldset>
+
+      <!-- analysis -->
+      <template v-else-if="s.mode==='analysis'">
+        <div class="vcard" v-if="selVeh">
+          <div class="row" style="justify-content:space-between"><b class="mono">{{selVeh.id}}</b><span class="tag" :style="{color:stateColor(selVeh.state)}">● {{STATE[selVeh.state].l}}</span></div>
+          <dl class="kv">
+            <dt>路线</dt><dd style="font-family:var(--f-body)">{{selVeh.route}}</dd>
+            <dt>车型</dt><dd style="font-family:var(--f-body)">{{selVeh.vt}}</dd>
+            <dt>利用率</dt><dd>{{pct(selVeh.util)}}</dd>
+            <dt>完成圈数</dt><dd>{{selVeh.laps}}</dd>
+            <dt>行驶里程</dt><dd>{{(selVeh.dist/1000).toFixed(2)}} km</dd>
+            <template v-if="selVeh.hasBat"><dt>电量</dt><dd>{{selVeh.battery.toFixed(0)}} %</dd><dt>充电次数</dt><dd>{{selVeh.charges}}</dd></template>
+          </dl>
+          <div class="row"><label class="check"><input type="checkbox" v-model="s.follow"> 镜头跟随</label><button class="btn sm" @click="s.selVeh=null;s.follow=false">取消选中</button></div>
+        </div>
+
+        <div v-if="!s.kpi" class="grp">
+          <div class="ttl">还没有仿真结果</div>
+          <div class="note">点底部「运行仿真」观看动画，或点「极速算完」直接得到 {{fmtT(s.sc.sim.duration)}} 的统计。结果会自动存入「方案对比」。</div>
+          <div class="warnbox" v-if="!s.sc.routes.length">当前方案没有路线。请先在「4 车辆与路线」中新建路线并设置停靠站点。</div>
+        </div>
+
+        <template v-else>
+          <div class="tabs" role="tablist">
+            <button v-for="t in ATABS" :key="t.id" :class="['btn sm',{on:s.atab===t.id}]" @click="s.atab=t.id">{{t.l}}</button>
+          </div>
+
+          <template v-if="s.atab==='overview'">
+            <div class="tiles">
+              <div class="tile"><b>{{pct(s.kpi.util)}}</b><span>平均车辆利用率</span></div>
+              <div class="tile"><b>{{s.kpi.deliveries}}</b><span>线边送料次数</span></div>
+              <div class="tile"><b>{{s.kpi.laps}}</b><span>完成循环圈数</span></div>
+              <div class="tile" :class="{alert:s.kpi.ontime!=null && s.kpi.ontime<0.9}"><b>{{s.kpi.ontime==null?'—':pct(s.kpi.ontime)}}</b><span>按节拍发车率</span></div>
+              <div class="tile" :class="{alert:s.kpi.waitShare>0.15}"><b>{{pct(s.kpi.waitShare)}}</b><span>交通等待占比</span></div>
+              <div class="tile" :class="{alert:s.kpi.overrides>0}"><b>{{s.kpi.overrides}}</b><span>疑似死锁放行</span></div>
+            </div>
+            <div class="grp"><div class="lab">车辆状态构成</div>
+              <div v-for="v in s.kpi.vehicles" :key="v.id" :class="['vrow',{on:s.selVeh===v.id}]" @click="pickVeh(v.id)">
+                <span class="mono"><span class="dot" :style="{background:v.color}"></span>{{v.id}}</span>
+                <span class="sbar" :title="stateTitle(v)"><i v-for="k in STATE_KEYS" :key="k" :style="{width:(v.pct[k]*100)+'%',background:stateColor(k)}"></i></span>
+                <span class="mono" style="text-align:right">{{pct(v.util)}}</span>
+              </div>
+              <div class="note">利用率 = (行驶 + 作业) / 仿真时长。</div>
+            </div>
+            <div class="grp"><div class="lab">车辆甘特图</div>
+              <canvas class="gantt" ref="gantt" aria-label="各车辆状态随时间的甘特图"></canvas>
+            </div>
+            <div class="grp" v-if="s.kpi.problems.length"><div class="lab">提示</div><div class="warnbox" v-for="(p,i) in s.kpi.problems" :key="i">{{p}}</div></div>
+          </template>
+
+          <template v-else-if="s.atab==='routes'">
+            <div class="tblwrap"><table class="tbl">
+              <thead><tr><th>路线</th><th class="n">车</th><th class="n">圈数</th><th class="n">平均循环</th><th class="n">最长</th><th class="n">计划</th><th class="n">准时</th></tr></thead>
+              <tbody><tr v-for="r in s.kpi.routes" :key="r.id"><td><span class="dot" :style="{background:r.color}"></span>{{r.name}}</td><td class="n">{{r.count}}</td><td class="n">{{r.laps}}</td><td class="n">{{r.avg==null?'—':fmtMS(r.avg)}}</td><td class="n">{{r.max==null?'—':fmtMS(r.max)}}</td><td class="n">{{r.period?fmtMS(r.period):'连续'}}</td><td class="n">{{r.ontime==null?'—':pct(r.ontime)}}</td></tr></tbody>
+            </table></div>
+            <div class="note">循环时间 = 相邻两次回到第 1 站的间隔（含排队与作业）。准时 = 到达首站不晚于计划节拍 30 s。</div>
+          </template>
+
+          <template v-else-if="s.atab==='stations'">
+            <div class="tblwrap"><table class="tbl">
+              <thead><tr><th>站点</th><th class="n">到访</th><th class="n">平均作业</th><th class="n">累计排队</th><th class="n">最大排队</th></tr></thead>
+              <tbody><tr v-for="st in s.kpi.stations" :key="st.id" class="click" @click="setMode('stations');select('station',st.id)"><td><span class="dot" :style="{background:STATION_TYPES[st.type].color}"></span>{{st.name}}</td><td class="n">{{st.visits}}</td><td class="n">{{st.visits?Math.round(st.avgDwell)+' s':'—'}}</td><td class="n">{{fmtMS(st.waitT)}}</td><td class="n">{{st.maxQ}} 台</td></tr></tbody>
+            </table></div>
+            <div class="note">排队 = 车辆在距站点 25 m 内因前方占用而停车的时间。</div>
+            <div class="lab">拥堵路段 Top 5</div>
+            <div class="tblwrap"><table class="tbl">
+              <thead><tr><th>路段</th><th class="n">长度</th><th class="n">累计等待</th></tr></thead>
+              <tbody><tr v-for="e in s.kpi.hotEdges" :key="e.id"><td class="mono">{{e.label}}</td><td class="n">{{e.len.toFixed(1)}} m</td><td class="n">{{fmtMS(e.wait)}}</td></tr>
+              <tr v-if="!s.kpi.hotEdges.length"><td colspan="3" class="note">暂无等待</td></tr></tbody>
+            </table></div>
+          </template>
+
+          <template v-else-if="s.atab==='events'">
+            <div class="note">最近 {{s.kpi.events.length}} 条事件，最新在上。</div>
+            <div>
+              <div class="evt" v-for="(e,i) in s.kpi.events" :key="i"><span class="mono">{{fmtT(e.t)}}</span><span class="tag" :style="{color:EVT[e.type]?.c}">{{EVT[e.type]?.l||e.type}}</span><span>{{e.msg}}</span></div>
+            </div>
+          </template>
+
+          <template v-else-if="s.atab==='compare'">
+            <div class="note">每个方案最近一次完整跑完的结果。换方案后重跑即可在此并排比较。</div>
+            <div class="tblwrap"><table class="tbl">
+              <thead><tr><th>方案</th><th class="n">时长</th><th class="n">利用率</th><th class="n">送料</th><th class="n">准时</th><th class="n">等待</th><th class="n">放行</th></tr></thead>
+              <tbody><tr v-for="r in compareRows" :key="r.id" :style="{fontWeight:r.id===s.currentId?700:400}"><td>{{r.name}}</td><td class="n">{{fmtT(r.t)}}</td><td class="n">{{pct(r.util)}}</td><td class="n">{{r.deliveries}}</td><td class="n">{{r.ontime==null?'—':pct(r.ontime)}}</td><td class="n">{{pct(r.waitShare)}}</td><td class="n">{{r.overrides}}</td></tr>
+              <tr v-if="!compareRows.length"><td colspan="7" class="note">还没有完整跑完的方案。</td></tr></tbody>
+            </table></div>
+          </template>
+        </template>
+      </template>
+
+      <!-- overviews -->
+      <template v-else>
+        <div class="grp" v-if="s.mode==='layout'">
+          <div class="ttl">车间布局</div>
+          <div class="note">{{s.sc.layout.w}} m × {{s.sc.layout.d}} m，共 {{s.sc.objects.length}} 个设施。</div>
+          <dl class="kv"><template v-for="(t,k) in OBJ_TYPES" :key="k"><dt>{{t.label}}</dt><dd>{{s.sc.objects.filter(o=>o.type===k).length}}</dd></template></dl>
+          <div class="note">选择左侧设施后点击地面放置默认尺寸，或按住拖出尺寸。选中设施后可拖动方块拉伸、拖动圆点旋转、拖动顶部箭头调高度。快捷键：R 旋转，方向键微移，Delete 删除，Ctrl+D 复制，Esc 取消。</div>
+        </div>
+        <div class="grp" v-else-if="s.mode==='network'">
+          <div class="ttl">路网</div>
+          <div class="note">路网由节点和路段组成。用「绘制路径」连续点击生成路段，靠近已有节点会自动吸附，点在已有路段上会自动拆分插入节点。右键或 Esc 结束当前一段。</div>
+          <div class="note">建议：主通道用单向环线；停靠作业时间长的站点放在旁路上，避免阻塞主路。</div>
+        </div>
+        <div class="grp" v-else-if="s.mode==='stations'">
+          <div class="ttl">站点与停留时间</div>
+          <div class="note">站点是车辆停靠作业的位置，绑定在路网节点上。每个站点可设固定、均匀分布或正态分布的停留时间。同一时刻每个站点只停 1 台车，后车排队。</div>
+          <dl class="kv"><template v-for="(t,k) in STATION_TYPES" :key="k"><dt><span class="dot" :style="{background:t.color}"></span>{{t.label}}</dt><dd>{{s.sc.stations.filter(x=>x.type===k).length}}</dd></template></dl>
+        </div>
+        <div class="grp" v-else-if="s.mode==='routes'">
+          <div class="ttl">车辆与路线</div>
+          <div class="note">在左侧选择路线设置车型、车辆数、循环周期和停靠顺序；选择车型调整速度、尺寸、拖挂节数和电池。</div>
+        </div>
+      </template>
+    </aside>
+  </main>
+
+  <footer class="simbar">
+    <div class="row">
+      <button class="btn primary play" @click="togglePlay" :disabled="s.sim.status==='done' || s.fast">{{ s.sim.status==='running' ? '暂停' : (s.sim.status==='paused' ? '继续' : '运行仿真') }}</button>
+      <button class="btn" @click="stepOnce" :disabled="s.sim.status==='running' || s.sim.status==='done' || s.fast">单步 +10 s</button>
+      <button class="btn" @click="fastRun" :disabled="s.sim.status==='done' || s.fast">{{s.fast?'计算中…':'极速算完'}}</button>
+      <button class="btn" @click="resetSim" :disabled="s.sim.status==='idle' || s.fast">重置</button>
+    </div>
+    <div class="seg" role="group" aria-label="仿真倍速"><button v-for="x in SPEEDS" :key="x" :class="['btn',{on:s.speed===x}]" @click="s.speed=x">{{x}}×</button></div>
+    <div class="clock"><div class="t">{{fmtT(s.sim.t)}} <small>/ {{fmtT(s.sc.sim.duration)}}</small></div><div class="prog"><i :style="{width:(Math.min(1,s.sim.t/s.sc.sim.duration)*100)+'%'}"></i></div></div>
+    <div class="row">
+      <label for="dur" class="note">时长</label>
+      <select id="dur" style="width:auto" v-model.number="s.sc.sim.duration" :disabled="locked"><option :value="3600">1 h</option><option :value="7200">2 h</option><option :value="14400">4 h</option><option :value="28800">8 h 班次</option><option :value="43200">12 h</option><option :value="86400">24 h</option></select>
+      <label for="seed" class="note">随机种子</label>
+      <input id="seed" type="number" style="width:64px" min="1" step="1" v-model.number="s.sc.sim.seed" :disabled="locked">
+    </div>
+    <div class="chips" v-if="s.kpi">
+      <span class="chip">利用率 <b>{{pct(s.kpi.util)}}</b></span>
+      <span class="chip">送料 <b>{{s.kpi.deliveries}}</b></span>
+      <span class="chip">准时 <b>{{s.kpi.ontime==null?'—':pct(s.kpi.ontime)}}</b></span>
+      <span class="chip">等待 <b>{{pct(s.kpi.waitShare)}}</b></span>
+    </div>
+  </footer>
+
+  <!-- dialogs -->
+  <div class="dlg-wrap" v-if="s.dialog" @click.self="s.dialog=null">
+    <div class="dlg" role="dialog" aria-modal="true">
+      <template v-if="s.dialog==='io'">
+        <div class="ttl">导入 / 导出方案</div>
+        <div class="lab">导出当前方案（JSON）</div>
+        <textarea id="expTxt" readonly :value="exportText" @focus="$event.target.select()"></textarea>
+        <div class="row"><button class="btn primary" @click="downloadExport">下载 .json 文件</button><button class="btn" @click="copyExport">复制 JSON</button><span class="note">可分享给同事或作为备份。</span></div>
+        <div class="lab">导入方案</div>
+        <textarea id="impTxt" v-model="s.importText" placeholder="把方案 JSON 粘贴到这里"></textarea>
+        <div class="row"><button class="btn primary" @click="importScenario(s.importText)" :disabled="!s.importText.trim()">导入为新方案</button>
+          <label class="btn" for="impFile">从 .json 文件导入…</label><input id="impFile" class="sr" type="file" accept=".json,application/json" @change="importFile">
+          <button class="btn" @click="restoreSample">恢复示例车间</button></div>
+        <template v-if="s.store.mode==='server' && localCount()">
+          <div class="lab">本机方案上传</div>
+          <div class="row"><button class="btn" @click="uploadLocal">把本机浏览器中的 {{localCount()}} 个方案上传到服务器</button><span class="note">用于把试用阶段保存在本机的方案转到服务器共享。</span></div>
+        </template>
+        <div class="row" style="justify-content:flex-end"><button class="btn" @click="s.dialog=null">关闭</button></div>
+      </template>
+      <template v-else-if="s.dialog==='rename'">
+        <div class="ttl">重命名方案</div>
+        <label class="sr" for="rnm">方案名称</label><input id="rnm" type="text" v-model="s.renameText" @keydown.enter="doRename">
+        <div class="row" style="justify-content:flex-end"><button class="btn" @click="s.dialog=null">取消</button><button class="btn primary" @click="doRename">保存</button></div>
+      </template>
+      <template v-else-if="s.dialog==='delete'">
+        <div class="ttl">删除方案「{{currentName}}」？</div>
+        <div class="note">删除后无法恢复。建议先在「导入 / 导出」中备份。</div>
+        <div class="row" style="justify-content:flex-end"><button class="btn" @click="s.dialog=null">取消</button><button class="btn primary" style="background:var(--bad);border-color:var(--bad)" @click="doDelete">删除方案</button></div>
+      </template>
+      <template v-else-if="s.dialog==='clearNet'">
+        <div class="ttl">清空路网？</div>
+        <div class="note">将删除全部节点、路段和站点，路线的停靠顺序会被清空。可用 Ctrl+Z 撤销。</div>
+        <div class="row" style="justify-content:flex-end"><button class="btn" @click="s.dialog=null">取消</button><button class="btn primary" style="background:var(--bad);border-color:var(--bad)" @click="clearNet">清空</button></div>
+      </template>
+      <template v-else-if="s.dialog==='validate'">
+        <div class="ttl">校验结果</div>
+        <div v-if="!s.validation.length" class="note">没有发现问题：所有路线的相邻站点之间都有可达路径。</div>
+        <ul class="vlist" v-else><li v-for="(v,i) in s.validation" :key="i" :style="{color:v.level==='error'?'var(--bad)':'var(--ink)'}">{{v.level==='error'?'错误':'提示'}}：{{v.msg}}</li></ul>
+        <div class="row" style="justify-content:flex-end"><button class="btn primary" @click="s.dialog=null">好的</button></div>
+      </template>
+    </div>
+  </div>
+  <div class="toast" v-if="s.toast" role="status">{{s.toast}}</div>
+</div>
+
+<script src="assets/vendor/three/three.min.js?v=0.128.0"></script>
+<script src="assets/vendor/three/OrbitControls.js?v=0.128.0"></script>
+<script src="assets/vendor/vue/vue.global.prod.js?v=3.4.21"></script>
+<script src="assets/js/sim-core.js?v=1.1.0"></script>
+<script src="assets/js/app.js?v=1.1.0"></script>
+</body>
+</html>

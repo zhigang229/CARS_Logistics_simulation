@@ -1,0 +1,5 @@
+{
+  "target": "\\\\SERVER01\\LogiSim$",
+  "siteUrl": "http://SERVER01:8080/",
+  "keepBackups": 5
+}

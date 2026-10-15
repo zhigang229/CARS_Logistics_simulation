@@ -1,0 +1,10 @@
+dist/
+*.exe
+*.dll
+*.pdb
+src/wwwroot/App_Data/scenarios/
+node_modules/
+.vs/
+Thumbs.db
+.DS_Store
+publish.config.json
